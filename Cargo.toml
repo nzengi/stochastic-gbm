@@ -13,4 +13,9 @@ keywords = ["stochastic", "finance", "GBM", "simulation", "mathematics"]
 categories = ["science", "simulation", "mathematics", "finance"]
 
 [dependencies]
-rand = "0.8"
+rand = { version = "0.8", features = ["std_rng"] }
+rand_distr = "0.4"
+thiserror = "1.0"
+
+[dev-dependencies]
+approx = "0.5"

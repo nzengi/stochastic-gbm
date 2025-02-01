@@ -1,84 +1,210 @@
-use rand::Rng;
+use rand::rngs::ThreadRng;
+use rand_distr::{Distribution, Normal};
+use thiserror::Error;
 
-/// The Geometric Brownian Motion (GBM) model simulates the price movement
-/// of an asset over time using the following formula:
-///
-/// dS = μ * S * dt + σ * S * dW
-///
-/// Where:
-/// - `S` is the asset price,
-/// - `μ` is the drift (expected return),
-/// - `σ` is the volatility (standard deviation of returns),
-/// - `dW` is the Wiener process increment (Brownian motion),
-/// - `dt` is the time increment.
-pub struct GeometricBrownianMotion {
+/// Errors that can occur during GBM simulation
+#[derive(Error, Debug)]
+pub enum GBMError {
+    #[error("Invalid parameter: {0}")]
+    InvalidParameter(String),
+    #[error("Distribution error: {0}")]
+    DistributionError(#[from] rand_distr::NormalError),
+}
+
+/// Configuration parameters for the GBM simulation
+#[derive(Debug, Clone)]
+pub struct GBMParams {
+    /// Drift (expected return) of the asset
     pub mu: f64,
+    /// Volatility (standard deviation of returns)
     pub sigma: f64,
-    pub n_paths: usize,
-    pub n_steps: usize,
-    pub t_end: f64,
+    /// Initial price
     pub s_0: f64,
+    /// Time horizon in years
+    pub t_end: f64,
+}
+
+/// Simulation parameters
+#[derive(Debug, Clone)]
+pub struct SimulationParams {
+    /// Number of paths to simulate
+    pub n_paths: usize,
+    /// Number of time steps per path
+    pub n_steps: usize,
+}
+
+/// Result of a GBM simulation
+#[derive(Debug)]
+pub struct SimulationResult {
+    /// Price paths [path_index][time_step]
+    pub paths: Vec<Vec<f64>>,
+    /// Time points corresponding to each step
+    pub time_points: Vec<f64>,
+    /// Parameters used for the simulation
+    pub params: GBMParams,
+}
+
+/// Geometric Brownian Motion simulator
+#[derive(Debug)]
+pub struct GeometricBrownianMotion {
+    params: GBMParams,
+    sim_params: SimulationParams,
+    rng: ThreadRng,
 }
 
 impl GeometricBrownianMotion {
-    /// Creates a new instance of the Geometric Brownian Motion model.
+    /// Creates a new GBM simulator with the given parameters
     ///
     /// # Arguments
     ///
-    /// * `mu` - The drift (mean or expected return) of the asset's price.
-    /// * `sigma` - The volatility (standard deviation of returns) of the asset.
-    /// * `n_paths` - Number of simulated paths.
-    /// * `n_steps` - Number of steps in each path.
-    /// * `t_end` - Total time duration of the simulation.
-    /// * `s_0` - Initial value of the asset (price at t=0).
+    /// * `mu` - Drift (expected return)
+    /// * `sigma` - Volatility
+    /// * `n_paths` - Number of paths to simulate
+    /// * `n_steps` - Number of time steps
+    /// * `t_end` - Time horizon in years
+    /// * `s_0` - Initial price
     ///
     /// # Returns
     ///
-    /// A new instance of `GeometricBrownianMotion`.
-    pub fn new(mu: f64, sigma: f64, n_paths: usize, n_steps: usize, t_end: f64, s_0: f64) -> Self {
-        Self {
-            mu,
-            sigma,
-            n_paths,
-            n_steps,
-            t_end,
-            s_0,
+    /// A Result containing either the GBM simulator or an error
+    pub fn new(
+        mu: f64,
+        sigma: f64,
+        n_paths: usize,
+        n_steps: usize,
+        t_end: f64,
+        s_0: f64,
+    ) -> Result<Self, GBMError> {
+        // Validate parameters
+        if sigma <= 0.0 {
+            return Err(GBMError::InvalidParameter(
+                "Volatility must be positive".to_string(),
+            ));
         }
+        if t_end <= 0.0 {
+            return Err(GBMError::InvalidParameter(
+                "Time horizon must be positive".to_string(),
+            ));
+        }
+        if s_0 <= 0.0 {
+            return Err(GBMError::InvalidParameter(
+                "Initial price must be positive".to_string(),
+            ));
+        }
+        if n_paths == 0 || n_steps == 0 {
+            return Err(GBMError::InvalidParameter(
+                "Number of paths and steps must be positive".to_string(),
+            ));
+        }
+
+        Ok(Self {
+            params: GBMParams {
+                mu,
+                sigma,
+                s_0,
+                t_end,
+            },
+            sim_params: SimulationParams { n_paths, n_steps },
+            rng: rand::thread_rng(),
+        })
     }
 
-    /// Simulates the asset price paths using the Euler-Maruyama method for Geometric Brownian Motion.
+    /// Simulates price paths using the Euler-Maruyama method
     ///
     /// # Returns
     ///
-    /// A 2D vector where each inner vector represents a simulated path of asset prices.
-    ///
-    /// Each path has `n_steps + 1` values, including the initial value `s_0`.
-    pub fn simulate(&self) -> Vec<Vec<f64>> {
-        let dt = self.t_end / self.n_steps as f64; // Time step size
-        let mut rng = rand::thread_rng(); // Random number generator
-        let mut paths = vec![vec![self.s_0; self.n_steps + 1]; self.n_paths]; // Initialize paths
+    /// A SimulationResult containing the price paths and simulation metadata
+    pub fn simulate(&mut self) -> Result<SimulationResult, GBMError> {
+        let dt = self.params.t_end / self.sim_params.n_steps as f64;
+        let normal = Normal::new(0.0, 1.0)?;
+        
+        let mut paths = vec![vec![self.params.s_0; self.sim_params.n_steps + 1]; self.sim_params.n_paths];
+        let time_points: Vec<f64> = (0..=self.sim_params.n_steps)
+            .map(|i| i as f64 * dt)
+            .collect();
 
-        // Simulate each path
-        for i in 0..self.n_paths {
-            for j in 1..=self.n_steps {
-                let d_w = rng.gen::<f64>() * dt.sqrt(); // Wiener process increment
-                paths[i][j] = paths[i][j - 1] * (1.0 + self.mu * dt + self.sigma * d_w).exp(); // Euler-Maruyama update
+        let drift = (self.params.mu - 0.5 * self.params.sigma.powi(2)) * dt;
+        let vol_sqrt_dt = self.params.sigma * dt.sqrt();
+
+        for i in 0..self.sim_params.n_paths {
+            for j in 1..=self.sim_params.n_steps {
+                let z = normal.sample(&mut self.rng);
+                paths[i][j] = paths[i][j - 1] * (drift + vol_sqrt_dt * z).exp();
             }
         }
 
-        paths
+        Ok(SimulationResult {
+            paths,
+            time_points,
+            params: self.params.clone(),
+        })
+    }
+
+    /// Returns statistical properties of the simulated paths at a given time index
+    ///
+    /// # Arguments
+    ///
+    /// * `result` - The simulation result
+    /// * `time_idx` - The time index to analyze
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing (mean, standard_deviation, min, max)
+    pub fn get_statistics(result: &SimulationResult, time_idx: usize) -> (f64, f64, f64, f64) {
+        let prices: Vec<f64> = result.paths.iter().map(|path| path[time_idx]).collect();
+        
+        let mean = prices.iter().sum::<f64>() / prices.len() as f64;
+        
+        let variance = prices.iter()
+            .map(|&price| (price - mean).powi(2))
+            .sum::<f64>() / (prices.len() - 1) as f64;
+        
+        let std_dev = variance.sqrt();
+        let min = prices.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+        let max = prices.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+
+        (mean, std_dev, min, max)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use approx::assert_relative_eq;
 
     #[test]
-    fn test_gbm_simulation() {
-        let gbm = GeometricBrownianMotion::new(0.2, 0.4, 50, 200, 1.0, 500.0);
-        let paths = gbm.simulate();
-        assert_eq!(paths.len(), 50);
-        assert_eq!(paths[0].len(), 201); // n_steps + 1
+    fn test_gbm_initialization() {
+        let result = GeometricBrownianMotion::new(0.05, 0.3, 1000, 252, 1.0, 100.0);
+        assert!(result.is_ok());
+
+        let result = GeometricBrownianMotion::new(0.05, -0.3, 1000, 252, 1.0, 100.0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_simulation_basic_properties() {
+        let mut gbm = GeometricBrownianMotion::new(0.05, 0.3, 1000, 252, 1.0, 100.0).unwrap();
+        let result = gbm.simulate().unwrap();
+
+        assert_eq!(result.paths.len(), 1000);
+        assert_eq!(result.paths[0].len(), 253);
+        assert_eq!(result.time_points.len(), 253);
+
+        for path in &result.paths {
+            assert_relative_eq!(path[0], 100.0);
+        }
+    }
+
+    #[test]
+    fn test_statistics() {
+        let mut gbm = GeometricBrownianMotion::new(0.05, 0.3, 1000, 252, 1.0, 100.0).unwrap();
+        let result = gbm.simulate().unwrap();
+        
+        let (mean, std_dev, min, max) = GeometricBrownianMotion::get_statistics(&result, 252);
+        
+        assert!(mean > 0.0);
+        assert!(std_dev > 0.0);
+        assert!(min < mean);
+        assert!(max > mean);
     }
 }
