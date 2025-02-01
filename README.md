@@ -70,5 +70,39 @@ The simulate function returns a 2D vector (Vec<Vec<f64>>) where each inner vecto
 ## Example Simulation
 In this example, we simulate 50 paths of an asset's price over a time horizon of 1 year, with 200 time steps. The drift (expected return) is set to 20% and the volatility is set to 40%.
 
+Path 1:
+t=0.00: $100.00
+t=0.08: $111.30
+t=0.17: $122.13
+t=0.25: $122.84
+t=0.33: $131.63
+t=0.42: $123.81
+t=0.50: $127.32
+t=0.58: $125.50
+t=0.67: $119.25
+t=0.75: $119.65
+t=0.83: $97.31
+t=0.92: $104.15
+t=1.00: $121.86
 
+Path 2:
+t=0.00: $100.00
+t=0.08: $91.19
+t=0.17: $91.19
+t=0.25: $94.71
+t=0.33: $82.49
+t=0.42: $86.10
+t=0.50: $83.15
+t=0.58: $85.18
+t=0.67: $94.08
+t=0.75: $92.25
+t=0.83: $90.82
+t=0.92: $94.31
+t=1.00: $90.06
+
+Final Statistics (t=1.0):
+Mean Price: $113.93
+Standard Deviation: $31.71
+Min Price: $68.11
+Max Price: $157.33
 
